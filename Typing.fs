@@ -11,24 +11,76 @@ let type_error fmt = throw_formatted TypeError fmt
 
 type subst = (tyvar * ty) list
 
-// TODO implement this
-let unify (t1 : ty) (t2 : ty) : subst = []
-
-// TODO implement this
-let apply_subst (t : ty) (s : subst) : ty = t
-
-// TODO implement this
-let compose_subst (s1 : subst) (s2 : subst) : subst = s1 @ s2
-
-let rec freevars_ty (t : ty) : tyvar Set =
+let rec apply_subst (t : ty) (s : subst) : ty =
     match t with
-    | TyName _ -> Set.empty
-    | TyArrow (t1, t2) -> Set.union (freevars_ty t1) (freevars_ty t2)
-    | TyVar tv -> Set.singleton tv
-    | TyTuple ts -> List.fold (fun set t -> Set.union set (freevars_ty t)) Set.empty ts 
+    | TyName(name) -> t
+    | TyVar(var1) ->
+        let sub = List.tryFind(fun (var, _) -> var = var1) s
+        match sub with
+        | None -> t
+        | Some(_, ty) -> ty
+    | TyTuple(nums) -> TyTuple(List.map(fun item -> apply_subst item s) nums)
+    | TyArrow(ty1, ty2) -> TyArrow(apply_subst ty1 s, apply_subst ty2 s)
+    
+let compose_subst (s1 : subst) (s2 : subst) : subst =
+    List.fold(fun acc (var, ty) -> (var,(apply_subst ty s1))::acc) s1 s2
 
-let freevars_scheme (Forall (tvs, t)) =
-    Set.difference (freevars_ty t) (Set.ofList tvs)
+let rec unify (t1 : ty) (t2 : ty) : subst =
+    match t1, t2 with
+    | TyName(name1), TyName(name2) -> if name1 = name2 then [] else type_error "wrong unification: cannot unify type variable: %s and %s" name1 name2
+    | TyVar(var1), ty | ty, TyVar(var1) -> if t1 = t2 then [] else [(var1, ty)]
+    | TyArrow(t1, t2), TyArrow(t3, t4) -> compose_subst (unify t1 t3) (unify t2 t4)
+    | TyTuple(tys1), TyTuple(tys2) -> List.fold2(fun acc ty1 ty2 -> let sub = unify ty1 ty2 in compose_subst acc sub) [] tys1 tys2
+    | _, _ -> type_error "wrong unification: cannot unify type variable: %s and %s" (pretty_ty t1) (pretty_ty t2)
+
+
+let rec new_fresh_var (env : scheme env) : ty =
+    let rec max_var (max: int) (ty: ty) :tyvar =
+        match ty with
+        | TyVar(num) -> if num > max then num else max
+        | TyTuple(nums) -> List.fold(fun max num -> let result = max_var max num in if result > max then result else max) max nums
+        | TyArrow(ty1, ty2) -> let num1 = max_var max ty1 in let num2 = max_var max ty2 in if num1 > num2 then num1 else num2
+        | TyName(_) -> 0
+ 
+    TyVar(1 + List.fold(fun acc (_, (Forall(_, ty))) -> if max_var 0 ty > acc then max_var 0 ty else acc) 0 env)
+
+let rec instantiate (Forall(type_vars, ty)) (env : scheme env) : ty =
+    let new_var = new_fresh_var env
+    let rec replace (oldTy:tyvar) (newTy:tyvar) (ty: ty): ty =
+        match ty with
+        | TyVar(num) -> if num = oldTy then TyVar(newTy) else TyVar(oldTy)
+        | TyTuple(nums) -> TyTuple(List.map(fun item -> replace oldTy newTy item ) nums)
+        | TyArrow(ty1, ty2) -> TyArrow(replace oldTy newTy ty1, replace oldTy newTy ty2)
+        | TyName(name) -> TyName(name)
+        
+    match new_var with
+    | TyVar(num) ->
+        let _, res_ty = List.fold(fun (new_fresh, acc_ty) old_ty_var -> let new_t = replace old_ty_var new_fresh acc_ty in (new_fresh + 1, new_t)) (num, ty) type_vars
+        res_ty
+    | _ -> unexpected_error "it should be TyVar but got %s " (pretty_ty new_var)
+
+let apply_subst_scheme(Forall (tvs, t)) (sub : subst) : scheme =
+    Forall(tvs, apply_subst t (List.filter (fun (name, _) -> not (List.contains name tvs )) sub))
+
+let apply_subst_to_env(env : scheme env) (sub :subst) : scheme env =
+    List.map(fun (name, scheme) -> name, apply_subst_scheme scheme sub ) env
+
+
+let rec freevars_ty t =
+    match t with
+    | TyName s -> Set.empty
+    | TyArrow (t1, t2) -> (freevars_ty t1) + (freevars_ty t2)
+    | TyVar tv -> Set.singleton tv
+    | TyTuple ts -> List.fold (fun r t -> r + freevars_ty t) Set.empty ts
+
+let freevars_scheme (Forall (tvs, t)) = freevars_ty t - Set.ofList tvs
+
+let freevars_scheme_env env =
+    List.fold (fun r (_, sch) -> r + freevars_scheme sch) Set.empty env
+
+let gen_scheme_from_env (env : scheme env) (ty : ty) : scheme =
+    let tvs = freevars_ty ty - freevars_scheme_env env
+    Forall(Set.toList tvs, ty)
 
 // type inference
 //
@@ -41,7 +93,150 @@ let gamma0 = [
 
 // TODO for exam
 let rec typeinfer_expr (env : scheme env) (e : expr) : ty * subst =
-    failwith "not implemented"
+    match e with
+    | Lit(LInt _) -> TyInt, []
+    | Lit(LFloat _) -> TyFloat, []
+    | Lit(LString _) -> TyString, []
+    | Lit(LChar _) -> TyChar, []
+    | Lit(LBool _) -> TyBool, []
+    | Lit(LUnit _) -> TyUnit, []
+
+    | Var(var) ->
+        let _, scheme = List.find(fun (name, scheme) -> name = var ) env
+        let new_ty = instantiate scheme env
+        new_ty, []
+
+    | Lambda(v, None, expr) ->
+        let new_var = new_fresh_var env
+        let new_schem = Forall([], new_var)
+        let new_env = (v, new_schem)::env
+        let t2, sub2 = typeinfer_expr new_env expr
+        let final_ty = apply_subst new_var sub2
+        TyArrow(final_ty, t2), sub2
+
+    | App(exp1, exp2) ->
+        let ty1, sub1 = typeinfer_expr env exp1
+        let ty2, sub2 = typeinfer_expr (apply_subst_to_env env sub1) exp2
+        let new_var = new_fresh_var env
+        let sub3 = unify ty1 (TyArrow(ty2, new_var))
+        let final_ty = apply_subst new_var sub3
+        final_ty, compose_subst (compose_subst sub3 sub2) sub1
+
+    | Let(name, ty_option, exp1, exp2) ->
+        let ty1, sub1 = typeinfer_expr env exp1
+        let new_env = (name, gen_scheme_from_env env ty1)::(apply_subst_to_env env sub1)
+        let ty2, sub2 = typeinfer_expr new_env exp2
+        let sub3 =
+            match ty_option with
+            | None -> []
+            | Some ty -> unify ty ty2
+        apply_subst ty2 sub3, compose_subst sub1 sub2
+
+    | LetRec(name, ty_option, lambda, expr) ->
+        match lambda with
+        | Lambda(_) -> ()
+        | something -> type_error "expecting a lambda but got %s" (pretty_expr something)
+
+        let new_env = (name, Forall([], new_fresh_var env))::env
+        let ty1, sub1 = typeinfer_expr new_env lambda
+        let new_scheme = gen_scheme_from_env env ty1
+        let new_env2 = (name, new_scheme)::(apply_subst_to_env env sub1)
+        let ty2, sub2 = typeinfer_expr new_env2 expr
+
+        let sub3 =
+            match ty_option with
+            | None -> []
+            | Some ty -> unify ty ty2
+        apply_subst ty2 sub3, compose_subst sub1 sub2
+
+
+    | IfThenElse(expr1, expr2, expr3o) ->
+        let ty1, sub1 = typeinfer_expr env expr1
+        let sub2 = unify ty1 TyBool
+        let sub3 = compose_subst sub2 sub1
+        let ty2, sub4 = typeinfer_expr (apply_subst_to_env env sub3) expr2
+        let sub5 = compose_subst sub4 sub3
+        match expr3o with
+        | None -> type_error "expecting a Some but got None"
+        | Some expr3 ->
+
+            let ty3, sub6 = typeinfer_expr (apply_subst_to_env env sub5) expr3
+            let sub7 = compose_subst sub6 sub5
+            let sub8 = unify ty2 ty3
+            apply_subst ty2 sub8, compose_subst sub8 sub7
+
+    | Tuple (exprs) ->
+        let sub, tys = List.fold (fun (sub_acc, tys_acc) expr -> 
+            let ty, sub = typeinfer_expr (apply_subst_to_env env sub_acc) expr  // gather subsitution
+            in (compose_subst sub sub_acc, ty::tys_acc)) ([], []) exprs
+
+        // try to have affect by applying substitution to every type in the tuple.
+        // EX) fun x -> (x, if x then 1 else 3, "I love F#", x);;
+        TyTuple (List.map (fun ty -> apply_subst ty sub) (List.rev tys)), sub
+
+
+
+
+    | BinOp (expr1, ("<" | "<=" | ">" | ">=" | "=" | "<>"), expr2) ->
+        let ty1, sub1 = typeinfer_expr env expr1
+        let _ty2, _ = typeinfer_expr env expr2 
+        let number_ty = 
+            match ty1, _ty2 with 
+            | (TyFloat, _) 
+            | (_, TyFloat) -> TyFloat
+            | _ -> TyInt
+
+        let ty2, sub2 = typeinfer_expr (apply_subst_to_env env sub1) expr2
+
+        let sub3 = unify number_ty ty1
+        let sub4 = unify number_ty ty2
+
+        TyBool, compose_subst (compose_subst (compose_subst sub4 sub3) sub2) sub1
+        
+    
+    | BinOp (expr1, ("+" | "-" | "/" | "%" | "*"), expr2) ->
+        let ty1, sub1 = typeinfer_expr env expr1
+        let _ty2, _ = typeinfer_expr env expr2 
+        let number_ty = 
+            match ty1, _ty2 with 
+            | (TyFloat, _) 
+            | (_, TyFloat) -> TyFloat
+            | _ -> TyInt
+
+        let ty2, sub2 = typeinfer_expr (apply_subst_to_env env sub1) expr2
+
+        let sub3 = unify number_ty ty1
+        let sub4 = unify number_ty ty2
+
+        number_ty, compose_subst (compose_subst (compose_subst sub4 sub3) sub2) sub1
+
+    | BinOp (expr1, ("and" | "or"), expr2) ->
+        let ty1, sub1 = typeinfer_expr env expr1
+        let ty2, sub2 = typeinfer_expr (apply_subst_to_env env sub1) expr2
+        let sub3 = unify TyBool ty1
+        let sub4 = unify TyBool ty2
+
+        TyBool, compose_subst (compose_subst (compose_subst sub4 sub3) sub2) sub1
+
+    | UnOp ("-", expr1) ->
+        let ty1, sub1 = typeinfer_expr env expr1
+        let number_ty = 
+            match ty1 with 
+            | TyFloat -> TyFloat
+            | _ -> TyInt
+        let sub2 = unify number_ty ty1
+        number_ty, compose_subst sub2 sub1
+
+    | UnOp ("not", expr1) ->
+        let ty1, sub1 = typeinfer_expr env expr1
+        let sub2 = unify TyBool ty1
+        TyBool, compose_subst sub2 sub1
+
+
+    | _ -> unexpected_error "typecheck_expr: unsupported expression: %s [AST: %A]" (pretty_expr e) e
+
+        
+        
 
 
 // type checker

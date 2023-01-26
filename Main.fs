@@ -15,7 +15,10 @@ let interpret_expr tenv venv e =
     #if DEBUG
     printfn "AST:\t%A\npretty:\t%s" e (pretty_expr e)
     #endif
-    let t = Typing.typecheck_expr tenv e
+
+    // Change type environment to schema environment for type inference
+    let scheme_env = List.map (fun (n, ty) -> (n, Forall([], ty))) tenv
+    let t, _ = Typing.typeinfer_expr scheme_env e
     #if DEBUG
     printfn "type:\t%s" (pretty_ty t)
     #endif
