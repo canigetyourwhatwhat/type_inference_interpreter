@@ -23,7 +23,7 @@ let rec apply_subst (t : ty) (s : subst) : ty =
     | TyArrow(ty1, ty2) -> TyArrow(apply_subst ty1 s, apply_subst ty2 s)
     
 let compose_subst (s1 : subst) (s2 : subst) : subst =
-    List.fold(fun acc (var, ty) -> (var,(apply_subst ty s1))::acc) s1 s2
+    List.fold(fun acc (tyvar2, ty2) -> (tyvar2,(apply_subst ty2 s1))::acc) s1 s2
 
 let rec unify (t1 : ty) (t2 : ty) : subst =
     match t1, t2 with
@@ -40,7 +40,7 @@ let rec new_fresh_var (env : scheme env) : ty =
         | TyVar(num) -> if num > max then num else max
         | TyTuple(nums) -> List.fold(fun max num -> let result = max_var max num in if result > max then result else max) max nums
         | TyArrow(ty1, ty2) -> let num1 = max_var max ty1 in let num2 = max_var max ty2 in if num1 > num2 then num1 else num2
-        | TyName(_) -> 0
+        | TyName(_) -> max
  
     TyVar(1 + List.fold(fun acc (_, (Forall(_, ty))) -> if max_var 0 ty > acc then max_var 0 ty else acc) 0 env)
 
@@ -48,7 +48,7 @@ let rec instantiate (Forall(type_vars, ty)) (env : scheme env) : ty =
     let new_var = new_fresh_var env
     let rec replace (oldTy:tyvar) (newTy:tyvar) (ty: ty): ty =
         match ty with
-        | TyVar(num) -> if num = oldTy then TyVar(newTy) else TyVar(oldTy)
+        | TyVar(num) -> if num = oldTy then TyVar(newTy) else ty
         | TyTuple(nums) -> TyTuple(List.map(fun item -> replace oldTy newTy item ) nums)
         | TyArrow(ty1, ty2) -> TyArrow(replace oldTy newTy ty1, replace oldTy newTy ty2)
         | TyName(name) -> TyName(name)
@@ -91,7 +91,6 @@ let gamma0 = [
 
 ]
 
-// TODO for exam
 let rec typeinfer_expr (env : scheme env) (e : expr) : ty * subst =
     match e with
     | Lit(LInt _) -> TyInt, []
@@ -102,12 +101,16 @@ let rec typeinfer_expr (env : scheme env) (e : expr) : ty * subst =
     | Lit(LUnit _) -> TyUnit, []
 
     | Var(var) ->
-        let _, scheme = List.find(fun (name, scheme) -> name = var ) env
+        let _, scheme = List.find(fun (name, _) -> name = var ) env
         let new_ty = instantiate scheme env
         new_ty, []
 
-    | Lambda(v, None, expr) ->
-        let new_var = new_fresh_var env
+    | Lambda(v, ty_option, expr) ->
+        //let new_var = new_fresh_var env
+        let new_var = 
+            match ty_option with 
+            | None -> new_fresh_var env
+            | Some ty -> ty 
         let new_schem = Forall([], new_var)
         let new_env = (v, new_schem)::env
         let t2, sub2 = typeinfer_expr new_env expr
@@ -130,7 +133,7 @@ let rec typeinfer_expr (env : scheme env) (e : expr) : ty * subst =
             match ty_option with
             | None -> []
             | Some ty -> unify ty ty2
-        apply_subst ty2 sub3, compose_subst sub1 sub2
+        apply_subst ty2 sub3, compose_subst sub3 (compose_subst sub2 sub1)
 
     | LetRec(name, ty_option, lambda, expr) ->
         match lambda with

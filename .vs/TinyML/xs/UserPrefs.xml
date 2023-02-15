@@ -1,25 +1,17 @@
-﻿<Properties StartupConfiguration="{2BD7C40F-1BA7-4282-864F-C3B685A22538}|Interactive">
+﻿<Properties StartupConfiguration="{2BD7C40F-1BA7-4282-864F-C3B685A22538}|Default">
+  <MultiItemStartupConfigurations />
+  <MonoDevelop.Ide.Workbench ActiveDocument="../FunctionalLanguages-UniPD/2022-23/Lessons/practice.fsx">
+    <Files>
+      <File FileName="Ast.fs" />
+      <File FileName="Main.fs" />
+      <File FileName="Typing.fs" Line="49" Column="20" />
+      <File FileName="../FunctionalLanguages-UniPD/2022-23/Lessons/practice.fsx" Line="48" Column="80" />
+    </Files>
+  </MonoDevelop.Ide.Workbench>
   <MonoDevelop.Ide.DebuggingService.Breakpoints>
     <BreakpointStore />
   </MonoDevelop.Ide.DebuggingService.Breakpoints>
   <MonoDevelop.Ide.DebuggingService.PinnedWatches />
   <MonoDevelop.Ide.Workspace ActiveConfiguration="Debug" />
   <MonoDevelop.Ide.ItemProperties.TinyML PreferredExecutionTarget="MonoDevelop.Default" />
-  <MonoDevelop.Ide.Workbench ActiveDocument="Typing.fs">
-    <Files>
-      <File FileName="Typing.fs" Line="142" Column="53" />
-      <File FileName="Ast.fs" Line="151" Column="40" />
-      <File FileName="Main.fs" />
-    </Files>
-    <Pads>
-      <Pad Id="ProjectPad">
-        <State name="__root__">
-          <Node name="TinyML" expanded="True">
-            <Node name="TinyML" expanded="True" />
-          </Node>
-        </State>
-      </Pad>
-    </Pads>
-  </MonoDevelop.Ide.Workbench>
-  <MultiItemStartupConfigurations />
 </Properties>

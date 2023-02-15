@@ -17,7 +17,7 @@ let interpret_expr tenv venv e =
     #endif
 
     // Change type environment to schema environment for type inference
-    let scheme_env = List.map (fun (n, ty) -> (n, Forall([], ty))) tenv
+    let scheme_env = List.map (fun (name, ty) -> (name, Forall(Set.toList (Typing.freevars_ty ty), ty))) tenv
     let t, _ = Typing.typeinfer_expr scheme_env e
     #if DEBUG
     printfn "type:\t%s" (pretty_ty t)
